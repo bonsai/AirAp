@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Rapper - 歌詞生成・作曲システム</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎤 AI Rapper</h1>
+            <p class="subtitle">歌詞生成・作曲・MP3出力システム</p>
+        </header>
+
+        <main>
+            <!-- プロンプト設定セクション -->
+            <section class="prompt-section">
+                <h2>プロンプト設定</h2>
+                
+                <div class="form-grid">
+                    <!-- テーマ選択 -->
+                    <div class="form-group">
+                        <label for="theme">テーマ</label>
+                        <select id="theme" class="form-control">
+                            <option value="love">Love (愛)</option>
+                            <option value="party">Party (パーティー)</option>
+                            <option value="sad">Sad (悲しい)</option>
+                            <option value="motivational">Motivational (モチベーション)</option>
+                            <option value="life">Life (人生)</option>
+                        </select>
+                    </div>
+
+                    <!-- スタイル選択 -->
+                    <div class="form-group">
+                        <label for="style">スタイル</label>
+                        <select id="style" class="form-control">
+                            <option value="rap">Rap (ラップ)</option>
+                            <option value="pop">Pop (ポップ)</option>
+                        </select>
+                    </div>
+
+                    <!-- モデル選択 -->
+                    <div class="form-group">
+                        <label for="model">AIモデル</label>
+                        <select id="model" class="form-control">
+                            <option value="yue">YuE (英語)</option>
+                            <option value="rinna">rinna (日本語)</option>
+                        </select>
+                    </div>
+
+                    <!-- AI使用/不使用 -->
+                    <div class="form-group">
+                        <label for="use_ai">AI使用</label>
+                        <select id="use_ai" class="form-control">
+                            <option value="true">有効</option>
+                            <option value="false">無効 (ルールベース)</option>
+                        </select>
+                    </div>
+
+                    <!-- BPM設定 -->
+                    <div class="form-group">
+                        <label for="bpm">BPM (テンポ)</label>
+                        <input type="number" id="bpm" class="form-control" min="60" max="200" value="120">
+                    </div>
+
+                    <!-- キー選択 -->
+                    <div class="form-group">
+                        <label for="key">キー</label>
+                        <select id="key" class="form-control">
+                            <option value="C">C (ハ長調)</option>
+                            <option value="D">D (ニ長調)</option>
+                            <option value="E">E (ホ長調)</option>
+                            <option value="F">F (ヘ長調)</option>
+                            <option value="G">G (ト長調)</option>
+                            <option value="A">A (イ長調)</option>
+                            <option value="B">B (ロ長調)</option>
+                            <option value="Am">Am (イ短調)</option>
+                            <option value="Dm">Dm (ニ短調)</option>
+                            <option value="Em">Em (ホ短調)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- カスタムプロンプト -->
+                <div class="form-group">
+                    <label for="custom_prompt">カスタムプロンプト (オプション)</label>
+                    <input type="text" id="custom_prompt" class="form-control" placeholder="カスタムタイトルや追加指示">
+                </div>
+
+                <!-- アクションボタン -->
+                <div class="button-group">
+                    <button id="generateBtn" class="btn btn-primary">
+                        <span class="btn-icon">🎵</span>
+                        歌詞を生成
+                    </button>
+                    <button id="composeBtn" class="btn btn-success">
+                        <span class="btn-icon">🎼</span>
+                        歌詞生成 + 作曲 + MP3出力
+                    </button>
+                </div>
+            </section>
+
+            <!-- 直接歌詞入力セクション -->
+            <section class="lyrics-section">
+                <h2>または、直接歌詞を入力</h2>
+                <div class="form-group">
+                    <label for="direct_lyrics">歌詞テキスト</label>
+                    <textarea id="direct_lyrics" class="form-control" rows="8" 
+                              placeholder="ここに歌詞を直接入力してください..."></textarea>
+                </div>
+                <button id="composeFromLyricsBtn" class="btn btn-secondary">
+                    <span class="btn-icon">🎹</span>
+                    この歌詞から作曲
+                </button>
+            </section>
+
+            <!-- 結果表示セクション -->
+            <section id="resultsSection" class="results-section" style="display: none;">
+                <h2>結果</h2>
+                
+                <!-- ローディング -->
+                <div id="loading" class="loading" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>処理中...</p>
+                </div>
+
+                <!-- エラー表示 -->
+                <div id="error" class="error" style="display: none;"></div>
+
+                <!-- 歌詞表示 -->
+                <div id="lyricsResult" class="result-box" style="display: none;">
+                    <h3>生成された歌詞</h3>
+                    <div class="lyrics-content" id="lyricsContent"></div>
+                    <div class="metadata" id="lyricsMetadata"></div>
+                </div>
+
+                <!-- MP3結果表示 -->
+                <div id="mp3Result" class="result-box" style="display: none;">
+                    <h3>生成された楽曲</h3>
+                    <div class="mp3-info" id="mp3Info"></div>
+                    <div class="audio-player" id="audioPlayer"></div>
+                    <div class="button-group">
+                        <button id="downloadBtn" class="btn btn-download">
+                            <span class="btn-icon">⬇️</span>
+                            MP3をダウンロード
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 生成履歴セクション -->
+            <section class="history-section">
+                <h2>生成履歴</h2>
+                <button id="listSongsBtn" class="btn btn-info">
+                    <span class="btn-icon">📋</span>
+                    生成済み楽曲一覧
+                </button>
+                <div id="historyList" class="history-list"></div>
+            </section>
+        </main>
+
+        <footer>
+            <p>AI Rapper API - Powered by FastAPI</p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+

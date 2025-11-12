@@ -1,8 +1,10 @@
 import random
-from typing import List, Dict
-import random
+from typing import List, Dict, Optional
 from dataclasses import dataclass
 from loguru import logger
+from pathlib import Path
+
+from .gguf_loader import get_loader, generate_with_gguf
 
 @dataclass
 class Song:
@@ -11,11 +13,114 @@ class Song:
     bpm: int
     key: str
 
-def generate_song_lyrics(theme: str = "love", style: str = "rap") -> Song:
+def generate_song_lyrics(
+    theme: str = "love",
+    style: str = "rap",
+    model: str = "yue",
+    use_ai: bool = True
+) -> Song:
     """
-    Generate song lyrics based on theme and style.
-    This is a simple rule-based implementation.
+    Generate song lyrics using GGUF models (rinna or YuE) or fallback to rule-based.
+    
+    Args:
+        theme: Theme of the song (e.g., "love", "party", "sad")
+        style: Style of the song (e.g., "rap", "pop")
+        model: Model to use ("yue" or "rinna")
+        use_ai: Whether to use AI model (True) or rule-based (False)
+    
+    Returns:
+        Song object with lyrics, title, BPM, and key
     """
+    if use_ai:
+        try:
+            return _generate_with_ai(theme, style, model)
+        except Exception as e:
+            logger.warning(f"AI generation failed: {e}, falling back to rule-based")
+            return _generate_rule_based(theme, style)
+    else:
+        return _generate_rule_based(theme, style)
+
+
+def _generate_with_ai(theme: str, style: str, model: str) -> Song:
+    """AIモデルを使用して歌詞を生成"""
+    # プロンプトの構築
+    if model == "rinna":
+        # rinnaは日本語モデルなので日本語プロンプト
+        prompt = f"""以下のテーマとスタイルでラップの歌詞を生成してください。
+
+テーマ: {theme}
+スタイル: {style}
+
+歌詞:"""
+    else:
+        # YuEは英語モデルなので英語プロンプト
+        prompt = f"""Generate rap lyrics with the following theme and style.
+
+Theme: {theme}
+Style: {style}
+
+Lyrics:"""
+    
+    logger.info(f"Generating lyrics with {model} model...")
+    
+    # GGUFモデルで生成
+    generated_text = generate_with_gguf(
+        prompt=prompt,
+        model_name=model,
+        max_tokens=512,
+        temperature=0.8,
+        top_p=0.9,
+        repeat_penalty=1.1,
+        stop=["\n\n\n", "---", "==="] if model == "yue" else ["\n\n\n", "---", "==="]
+    )
+    
+    # 生成されたテキストから歌詞を抽出
+    lyrics_lines = _extract_lyrics_from_text(generated_text, model)
+    
+    # 歌詞が短すぎる場合は補完
+    if len(lyrics_lines) < 8:
+        logger.warning("Generated lyrics too short, supplementing...")
+        additional = _generate_rule_based(theme, style)
+        lyrics_lines.extend(additional.lyrics[:8])
+    
+    return Song(
+        title=f"{theme.capitalize()} Song",
+        lyrics=lyrics_lines,
+        bpm=random.randint(80, 140) if style == "rap" else random.randint(70, 120),
+        key=random.choice(["C", "D", "E", "F", "G", "A", "B", "Am", "Dm", "Em"])
+    )
+
+
+def _extract_lyrics_from_text(text: str, model: str) -> List[str]:
+    """生成されたテキストから歌詞行を抽出"""
+    lines = []
+    
+    # テキストを行に分割
+    for line in text.split("\n"):
+        line = line.strip()
+        # 空行やプロンプト部分をスキップ
+        if not line or line.startswith("テーマ") or line.startswith("Theme") or line.startswith("スタイル") or line.startswith("Style"):
+            continue
+        # 歌詞行として追加
+        if len(line) > 3:  # 短すぎる行はスキップ
+            lines.append(line)
+    
+    # 最低限の行数がない場合は空行を追加して構造化
+    if len(lines) < 4:
+        lines = lines * 2  # 繰り返し
+    
+    # 4行ごとに空行を挿入（verse区切り）
+    formatted_lines = []
+    for i, line in enumerate(lines):
+        formatted_lines.append(line)
+        if (i + 1) % 4 == 0 and i < len(lines) - 1:
+            formatted_lines.append("")
+    
+    return formatted_lines[:32]  # 最大32行
+
+
+def _generate_rule_based(theme: str, style: str) -> Song:
+    """ルールベースの歌詞生成（フォールバック）"""
     # Basic word banks
     themes = {
         "love": ["heart", "love", "baby", "kiss", "hold", "touch", "feel"],

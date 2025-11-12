@@ -1,0 +1,64 @@
+# Kaggle用Dockerfile
+# 歌詞生成 → 作曲 → MP3出力の統合システム
+
+FROM gcr.io/kaggle-images/python:v145
+
+# 作業ディレクトリを設定
+WORKDIR /app
+
+# システム依存関係のインストール
+# MIDI→MP3変換に必要なツール
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    fluidsynth \
+    timidity \
+    timidity-interfaces-extra \
+    fluid-soundfont-gm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python依存関係のインストール
+COPY requirements.txt .
+
+# llama-cpp-pythonを先にインストール（ビルドに時間がかかるため）
+# CPU版を使用（Kaggle環境に最適化）
+RUN pip install --no-cache-dir llama-cpp-python || \
+    pip install --no-cache-dir --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu llama-cpp-python
+
+# その他の依存関係をインストール
+RUN pip install --no-cache-dir -r requirements.txt
+
+# NLTKデータのダウンロード（Kaggle環境で利用可能な場合）
+RUN python -c "import nltk; nltk.download('punkt', quiet=True)" || true
+
+# アプリケーションコードをコピー
+COPY app/ ./app/
+
+# ディレクトリ構造を作成
+RUN mkdir -p ./rin/models ./yue/Models/YuE ./static
+
+# 静的ファイル（UI）をコピー
+COPY static/ ./static/
+
+# GGUFモデルファイルをコピー（存在する場合）
+# 注意: モデルファイルが大きい場合は、Kaggle環境で別途ダウンロードすることを推奨
+# COPYコマンドは存在しないファイルに対してエラーを出さないため、条件付きコピーは実行時に処理
+RUN mkdir -p ./yue/Models/YuE ./rin/models
+
+# 出力ディレクトリを作成
+RUN mkdir -p /app/output
+
+# 環境変数
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+ENV FLUIDSYNTH_SOUNDFONT=/usr/share/sounds/sf2/FluidR3_GM.sf2
+
+# GGUFモデルパス（環境変数で上書き可能）
+ENV YUE_MODEL_PATH=/app/yue/Models/YuE/yue-s1-7b-anneal-en-cot-q6_k.gguf
+ENV RINNA_MODEL_PATH=/app/rin/models/rinna.gguf
+
+# ポート公開（FastAPI用）
+EXPOSE 8000
+
+# アプリケーション起動
+CMD ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]
+
