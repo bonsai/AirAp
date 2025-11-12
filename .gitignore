@@ -50,3 +50,4 @@ Dockerfile
 # System Files
 .DS_Store
 Thumbs.db
+yue/Models/YuE/yue-s1-7b-anneal-en-cot-q6_k.gguf
