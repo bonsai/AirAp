@@ -4,6 +4,7 @@ DockerイメージのビルドとDocker Hubへのアップロードスクリプ�
 import subprocess
 import sys
 import os
+import time
 from pathlib import Path
 from typing import Optional
 import argparse
@@ -34,13 +35,14 @@ except ImportError:
 logger.add("build.log", rotation="10 MB", level="INFO")
 
 
-def run_command(cmd: list, check: bool = True) -> tuple[int, str, str]:
+def run_command(cmd: list, check: bool = True, show_progress: bool = False) -> tuple[int, str, str]:
     """
     コマンドを実行
     
     Args:
         cmd: 実行するコマンドのリスト
         check: エラー時に例外を発生させるか
+        show_progress: リアルタイムで進捗を表示するか
     
     Returns:
         (returncode, stdout, stderr)のタプル
@@ -48,17 +50,42 @@ def run_command(cmd: list, check: bool = True) -> tuple[int, str, str]:
     logger.info(f"Executing: {' '.join(cmd)}")
     
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=check
-        )
-        if result.stdout:
-            logger.info(result.stdout)
-        if result.stderr:
-            logger.warning(result.stderr)
-        return result.returncode, result.stdout, result.stderr
+        if show_progress:
+            # リアルタイムで進捗を表示
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+            
+            stdout_lines = []
+            for line in process.stdout:
+                line = line.rstrip()
+                if line:
+                    print(line, flush=True)  # リアルタイム表示
+                    stdout_lines.append(line)
+                    logger.debug(line)
+            
+            process.wait()
+            stdout = '\n'.join(stdout_lines)
+            stderr = ""
+            returncode = process.returncode
+        else:
+            # 従来の方法（出力をキャプチャ）
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=check
+            )
+            if result.stdout:
+                logger.info(result.stdout)
+            if result.stderr:
+                logger.warning(result.stderr)
+            return result.returncode, result.stdout, result.stderr
     except subprocess.CalledProcessError as e:
         logger.error(f"Command failed: {e}")
         logger.error(f"stderr: {e.stderr}")
@@ -117,10 +144,23 @@ def build_image(
         logger.error(f"Dockerfile not found: {dockerfile}")
         return False
     
-    logger.info(f"Building Docker image: {image_name}:{tag}")
+    logger.info(f"🔨 Building Docker image: {image_name}:{tag}")
+    logger.info(f"📄 Using Dockerfile: {dockerfile}")
     
+    # Dockerfileのステップ数をカウント（概算）
+    try:
+        with open(dockerfile, 'r', encoding='utf-8') as f:
+            dockerfile_content = f.read()
+            step_count = len([line for line in dockerfile_content.split('\n') 
+                            if line.strip().startswith(('FROM', 'RUN', 'COPY', 'ADD', 'WORKDIR', 'ENV', 'EXPOSE', 'CMD'))])
+            logger.info(f"📊 Estimated build steps: {step_count}")
+    except Exception:
+        pass
+    
+    start_time = time.time()
     cmd = [
         "docker", "build",
+        "--progress=plain",  # 進捗を表示
         "-f", dockerfile,
         "-t", f"{image_name}:{tag}",
         "."
@@ -131,13 +171,23 @@ def build_image(
         for key, value in build_args.items():
             cmd.extend(["--build-arg", f"{key}={value}"])
     
-    returncode, stdout, stderr = run_command(cmd, check=False)
+    logger.info("⏳ Build started... (this may take several minutes)")
+    print()  # 空行を追加
+    
+    returncode, stdout, stderr = run_command(cmd, check=False, show_progress=True)
+    
+    elapsed_time = time.time() - start_time
+    minutes = int(elapsed_time // 60)
+    seconds = int(elapsed_time % 60)
     
     if returncode == 0:
         logger.success(f"✅ Image built successfully: {image_name}:{tag}")
+        logger.info(f"⏱️  Build time: {minutes}m {seconds}s")
         return True
     else:
-        logger.error(f"❌ Build failed: {stderr}")
+        logger.error(f"❌ Build failed after {minutes}m {seconds}s")
+        if stderr:
+            logger.error(f"Error details: {stderr}")
         return False
 
 
@@ -162,7 +212,7 @@ def tag_image(
     if target_tag is None:
         target_tag = source_tag
     
-    logger.info(f"Tagging {source_image}:{source_tag} as {target_image}:{target_tag}")
+    logger.info(f"🏷️  Tagging {source_image}:{source_tag} as {target_image}:{target_tag}")
     
     cmd = [
         "docker", "tag",
@@ -170,8 +220,14 @@ def tag_image(
         f"{target_image}:{target_tag}"
     ]
     
-    returncode, _, _ = run_command(cmd, check=False)
-    return returncode == 0
+    returncode, stdout, stderr = run_command(cmd, check=False)
+    
+    if returncode == 0:
+        logger.success(f"✅ Tagged successfully")
+        return True
+    else:
+        logger.error(f"❌ Tagging failed")
+        return False
 
 
 def push_image(
@@ -195,23 +251,48 @@ def push_image(
     else:
         full_image_name = image_name
     
-    logger.info(f"Pushing image to Docker Hub: {full_image_name}:{tag}")
+    logger.info(f"📤 Pushing image to Docker Hub: {full_image_name}:{tag}")
     
     # ログイン確認
     if not check_docker_login():
-        logger.warning("Docker login status unclear. Make sure you're logged in:")
+        logger.warning("⚠️  Docker login status unclear. Make sure you're logged in:")
         logger.info("Run: docker login")
     
+    # イメージサイズを確認
+    try:
+        result = subprocess.run(
+            ["docker", "image", "inspect", f"{image_name}:{tag}", "--format", "{{.Size}}"],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            size_bytes = int(result.stdout.strip())
+            size_mb = size_bytes / (1024 * 1024)
+            logger.info(f"📦 Image size: {size_mb:.2f} MB")
+    except Exception:
+        pass
+    
+    start_time = time.time()
     cmd = ["docker", "push", f"{full_image_name}:{tag}"]
     
-    returncode, stdout, stderr = run_command(cmd, check=False)
+    logger.info("⏳ Push started... (this may take several minutes depending on image size)")
+    print()  # 空行を追加
+    
+    returncode, stdout, stderr = run_command(cmd, check=False, show_progress=True)
+    
+    elapsed_time = time.time() - start_time
+    minutes = int(elapsed_time // 60)
+    seconds = int(elapsed_time % 60)
     
     if returncode == 0:
         logger.success(f"✅ Image pushed successfully: {full_image_name}:{tag}")
-        logger.info(f"Docker Hub URL: https://hub.docker.com/r/{full_image_name}")
+        logger.info(f"⏱️  Push time: {minutes}m {seconds}s")
+        logger.info(f"🔗 Docker Hub URL: https://hub.docker.com/r/{full_image_name}")
         return True
     else:
-        logger.error(f"❌ Push failed: {stderr}")
+        logger.error(f"❌ Push failed after {minutes}m {seconds}s")
+        if stderr:
+            logger.error(f"Error details: {stderr}")
         return False
 
 
@@ -251,27 +332,43 @@ def build_and_push(
     
     # ビルド
     if not skip_build:
+        logger.info("=" * 60)
+        logger.info("📦 STEP 1/3: Building Docker Image")
+        logger.info("=" * 60)
         if not build_image(dockerfile, image_name, tag, build_args):
             return False
+        logger.info("")
+    else:
+        logger.info("⏭️  Skipping build step (using existing image)")
     
     # タグ付け（usernameが指定されている場合）
     if username and not skip_push:
+        logger.info("=" * 60)
+        logger.info("🏷️  STEP 2/3: Tagging Image")
+        logger.info("=" * 60)
         full_image_name = f"{username}/{image_name}"
         if not tag_image(image_name, full_image_name, tag, tag):
-            logger.warning("Tagging failed, but continuing...")
+            logger.warning("⚠️  Tagging failed, but continuing...")
         
         # Docker Hub URLを表示
         if DOCKER_HUB_URL:
-            logger.info(f"Docker Hub URL: {DOCKER_HUB_URL}")
+            logger.info(f"🔗 Target repository: {DOCKER_HUB_URL}")
+        logger.info("")
     
     # プッシュ
     if not skip_push:
+        logger.info("=" * 60)
+        logger.info("📤 STEP 3/3: Pushing to Docker Hub")
+        logger.info("=" * 60)
         if not push_image(image_name, tag, username):
             return False
+        logger.info("")
     
+    logger.success("=" * 60)
     logger.success("🎉 Build and push completed successfully!")
+    logger.success("=" * 60)
     if DOCKER_HUB_URL and username:
-        logger.info(f"View on Docker Hub: {DOCKER_HUB_URL}")
+        logger.info(f"🔗 View on Docker Hub: {DOCKER_HUB_URL}")
     return True
 
 
@@ -346,13 +443,19 @@ def main():
             else:
                 logger.warning(f"Invalid build arg format: {arg}")
     
-    # プッシュする場合はusernameが必要
+    # プッシュする場合のみusernameが必要
     final_username = args.username or DOCKER_HUB_USERNAME
     if not args.skip_push and not final_username:
-        logger.error("--username is required for push")
-        logger.info("Usage: python scripts/build_and_push.py --username YOUR_USERNAME")
-        logger.info(f"Or set DOCKER_HUB_USERNAME in scripts/config.py")
+        logger.error("❌ --username is required for push")
+        logger.info("Usage: python -m scripts.build_and_push")
+        logger.info("   or: python -m scripts.build_and_push --skip-push  # for build only")
+        logger.info("   or: python -m scripts.build_and_push --username YOUR_USERNAME")
+        logger.info(f"   or: Set DOCKER_HUB_USERNAME in scripts/config.py")
         sys.exit(1)
+    
+    # ビルドのみの場合は情報を表示
+    if args.skip_push:
+        logger.info("ℹ️  Push step skipped. Building only.")
     
     # 設定情報を表示
     if DOCKER_HUB_URL:
@@ -374,5 +477,16 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # スクリプトが直接実行された場合、
+    # カレントディレクトリからの相対インポートが機能するようにパスを追加
+    import os
+    # このファイルの場所を基準にプロジェクトルートを特定
+    # (scripts/build_and_push.py -> ai_rapper/)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, project_root)
+    
+    # モジュールとして実行されているかのように見せかける
+    # これにより、`from . import ...` が機能する
+    from scripts import build_and_push
+    build_and_push.main()
 

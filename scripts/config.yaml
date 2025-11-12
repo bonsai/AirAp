@@ -1,0 +1,22 @@
+# Docker configuration
+# Docker Hub repository information
+docker_hub:
+  username: "vonsai"
+  repository: "ryup"
+  full_name: "{{ docker_hub.username }}/{{ docker_hub.repository }}"
+  url: "https://hub.docker.com/repository/docker/{{ docker_hub.full_name }}/general"
+
+# Default settings
+defaults:
+  dockerfile: "Dockerfile.kaggle"
+  image_name: "ryup"
+  tag: "latest"
+
+# Build arguments (optional)
+build_args: {}
+
+# Logging settings
+logging:
+  level: "INFO"
+  file: "build.log"
+  rotation: "10 MB"

@@ -11,6 +11,7 @@ DOCKER_HUB_URL = f"https://hub.docker.com/repository/docker/{DOCKER_HUB_FULL_NAM
 
 # デフォルト設定
 DEFAULT_DOCKERFILE = "Dockerfile.kaggle"
-DEFAULT_IMAGE_NAME = "ai-rapper-kaggle"
+DEFAULT_IMAGE_NAME = "ryup"
 DEFAULT_TAG = "latest"
+
 
